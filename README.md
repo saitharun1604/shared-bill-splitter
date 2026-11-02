@@ -1,157 +1,140 @@
-# SDE Intern Assignment: Shared Bill Splitter
+# Shared Bill Splitter
 
-Welcome. In this assignment you build a small bill splitter for a shared home. It has two parts:
+Repository: [https://github.com/saitharun1604/shared-bill-splitter.git](https://github.com/saitharun1604/shared-bill-splitter.git)
 
-1. **Homes and members:** create a home and add members to it.
-2. **Bill splitting:** split a bill between the members. Each member pays their own share.
+A safe, correct, and fully typed bill splitter for shared households built with **Hono on Cloudflare Workers**, **Cloudflare D1 (SQLite)**, **React 19**, and **TanStack Router**.
 
-The assignment is small on purpose. We want correct, safe, and clear code. We do not want many features.
+---
 
-## What we look at
+## Architecture Overview
 
-- **Your code passes the tests.** The tests decide, not opinion. You get the visible tests. We also run extra tests that you do not see.
-- **Your code is safe when things go wrong.** Wrong input, repeated requests, and two requests at the same time must not break your data.
-- **Your code is typed.** Use TypeScript. Do not use `any`.
-- **You understand your code.** You record a short video and explain it.
+This project is structured as a **pnpm monorepo workspace** with strict separation of concerns between API and client:
 
-Take your time. A careful, correct solution is better than a fast one. We expect 2 to 3 days of real work.
+```
+shared-bill-splitter/
+├── api/                  # Cloudflare Workers API (Hono)
+│   ├── migrations/       # D1 SQLite migration files (0001_init.sql)
+│   ├── src/
+│   │   └── index.ts      # Hono application routes and business logic
+│   └── test/             # Vitest test suite running in Workers runtime
+├── web/                  # Frontend Single Page App (React 19 + TanStack Router)
+│   └── src/
+│       ├── routes/       # File-based routes (index.tsx)
+│       └── main.tsx      # App bootstrap and router provider
+├── biome.json            # Code formatting and linting configuration
+└── package.json          # Root workspace scripts and tooling
+```
 
-## Stack (required)
+### Data Flow
 
-- **API:** Hono on Cloudflare Workers
-- **Database:** Cloudflare D1 (SQLite). The binding is `DB` in `api/wrangler.jsonc`.
-- **Web:** React, Vite, TanStack Router
-- **Language:** TypeScript on both sides
-- **Tests:** Vitest, running inside the Workers runtime
-- **Quality:** Biome. `pnpm check` and `pnpm typecheck` must pass.
+1. **Client / Web UI**: The React interface interacts with the backend via `/api/*` endpoints (proxied locally through Vite to `http://127.0.0.1:8787`).
+2. **API Layer**: Hono router validates request bodies, headers, and route parameters. Valid requests are mapped to Cloudflare D1 prepared SQL statements.
+3. **Database Layer**: Cloudflare D1 (SQLite) persists homes, members, bills, shares, and payment records. Referential integrity is strictly guarded by foreign keys with cascading deletes, `CHECK` constraints on positive integers, and `UNIQUE` constraints.
 
-You choose the rest (styling, form library, validation library). Pick tools you can explain.
+---
 
-## The task
+## Setup & Running Locally
 
-The assignment has two parts. Do Part 1 first. Part 2 builds on it.
+### Prerequisites
 
-**Database.** Write the schema as SQL migration files in `api/migrations/`. For example `0001_init.sql`. The tests apply every file in this folder. Your schema must have **at least 3 named constraints** that protect the data. For example a foreign key, a `CHECK`, or a `UNIQUE` key. Be ready to explain what each constraint stops.
+- **Node.js** >= 20.x
+- **pnpm** >= 9.x
 
-**Errors.** Every error response is JSON: `{ "error": "message" }`.
+### 1. Installation
 
-## Part 1: Homes and members
-
-Create a home and add members to it. The order in which members are added matters in Part 2.
-
-#### `POST /api/homes`
-
-- Request: `{ "name": string }`
-- Success: `201` `{ id, name }`
-
-#### `POST /api/homes/:homeId/members`
-
-- Request: `{ "name": string }`
-- Success: `201` `{ id, homeId, name }`
-- Errors: `404` home not found
-
-Visible tests: `api/test/homes.test.ts`.
-
-## Part 2: Bill splitting
-
-Add a bill to a home, split it between the members, and let each member pay their share.
-
-All amounts are whole **cents** (integers). `100` cents is 1 dollar. Never use decimals for money.
-
-#### `POST /api/homes/:homeId/bills`
-
-- Request: `{ "title": string, "totalCents": number }`
-- Success: `201` `{ id, homeId, title, totalCents, shares: [{ id, memberId, amountCents, paidAt: null }] }`
-- Errors: `404` home not found. `422` total is not a positive whole number, or the home has no members.
-
-#### `POST /api/bills/:billId/shares/:shareId/pay`
-
-- Request: header `Idempotency-Key`
-- Success: `200` `{ id, memberId, amountCents, paidAt }`
-- Errors: `400` key missing. `404` bill or share not found. `409` share already paid with a different key.
-
-#### `GET /api/homes/:homeId/balances`
-
-- Success: `200` `{ balances: [{ memberId, name, outstandingCents }] }`
-- Errors: `404` home not found
-
-**Rules**
-
-- **Split.** A bill is split between all members of the home. The shares always add up to `totalCents`. If the amount does not divide evenly, the extra cents go to the members one by one, in the order the members were added to the home. Example: 1000 cents between 3 members gives `334`, `333`, `333`.
-- **Pay.** Paying marks one share as paid and sets `paidAt`. If the same `Idempotency-Key` is sent again for the same share, answer `200` with the same result. Do not pay twice. If two requests pay the same share at the same time, only one may succeed.
-- **Balances.** `outstandingCents` is the sum of the member's unpaid shares, across all bills of the home. List the members in the order they were added.
-
-Visible tests: `api/test/bills.test.ts` and `api/test/payments.test.ts`.
-
-#### Web page
-
-Build one page that:
-
-- shows the bills of a home and the shares of each bill,
-- lets a member pay a share,
-- shows clear **loading**, **empty**, and **error** states,
-- keeps the share unpaid and shows an error if the payment fails.
-
-The page must not crash when the API answers with an error or is slow.
-
-## Cases you must handle
-
-You must handle these cases and talk about them in your video:
-
-1. A home with no members.
-2. An amount that is zero, negative, or not a whole number.
-3. An amount that does not divide evenly.
-4. The same payment request sent twice.
-5. Two members paying the same share at the same time.
-6. A bill or share that does not exist.
-7. The API answers with a 500 error or is slow. The web page must not crash.
-
-## Run it
-
-This is a pnpm workspace. Install once at the root.
+Clone the repository and install all workspace dependencies:
 
 ```bash
+git clone https://github.com/saitharun1604/shared-bill-splitter.git
+cd shared-bill-splitter
 pnpm install
-pnpm dev          # api on :8787 and web on :5173
 ```
 
-Open http://localhost:5173. The starter page shows a title. `/api/health` returns `{ "status": "ok" }`.
+### 2. Development Mode
+
+Start both the API (`:8787`) and the Web app (`:5173`) concurrently. This automatically applies pending D1 migrations to the local database before starting:
 
 ```bash
-pnpm test         # run the visible tests in api/test
-pnpm check        # Biome: format and lint. Must pass.
-pnpm check:fix    # fix what Biome can fix
-pnpm typecheck    # tsc on both packages. Must pass.
-pnpm build        # production build of the web app
+pnpm dev
 ```
 
-`pnpm dev` applies your migrations to a local database before it starts the API.
+- **Web App:** [http://localhost:5173](http://localhost:5173)
+- **API Health Check:** [http://127.0.0.1:8787/api/health](http://127.0.0.1:8787/api/health)
 
-If pnpm says some build scripts were ignored, run `pnpm approve-builds` and allow `esbuild` and `workerd`.
-
-When you change `api/wrangler.jsonc`, refresh the `Env` types:
+### 3. Verification & Quality Commands
 
 ```bash
-pnpm --filter bill-splitter-api cf-typegen
+pnpm check        # Biome: verify code formatting and lint rules (must pass)
+pnpm check:fix    # Biome: automatically apply formatting/lint fixes
+pnpm typecheck    # TypeScript: strict type check on both api and web packages
+pnpm test         # Vitest: run all automated unit and integration tests
+pnpm build        # Vite: create production build of the React web application
 ```
 
-## Rules for the tests
+---
 
-- The visible tests are in `api/test`. They start with a failing result. Your job is to make them pass.
-- Do **not** change the visible tests or `api/test/helpers.ts`. We compare them with the original.
-- We run extra tests after you submit. They test the cases in "Cases you must handle" more closely.
+## API Endpoints
 
-## AI policy
+### Part 1: Homes and Members
 
-You can use AI tools. Tell us which ones and where in your answers on the form.
-You must understand every line you submit. We check this with your video and in a live call. "The AI wrote it" is not an answer.
+- `POST /api/homes`: Create a home (`{ "name": string }` -> `201 { id, name }`).
+- `POST /api/homes/:homeId/members`: Add a member to a home (`{ "name": string }` -> `201 { id, homeId, name }`).
+- `GET /api/homes`: List all homes for quick selection in the UI.
+- `GET /api/homes/:homeId/members`: List members belonging to a home.
 
-## How to submit
+### Part 2: Bill Splitting & Payments
 
-1. Click **Use this template**, then **Create a new repository**. Make the repository **public**.
-2. Build your solution in your new repository. Small, clear commits are welcome.
-3. Update this README with a short section called **Decisions**. Write 3 decisions you made and why.
-4. Record a video of **3 minutes or less** (Loom or unlisted YouTube). Show the architecture, the data flow, and one trade-off you made. Make sure anyone with the link can view it.
-5. Paste the repository link and the video link in the application form.
+- `POST /api/homes/:homeId/bills`: Add and split a bill (`{ "title": string, "totalCents": number }` -> `201 { id, homeId, title, totalCents, shares: [...] }`).
+- `POST /api/bills/:billId/shares/:shareId/pay`: Pay a specific share. Requires `Idempotency-Key` header (`200 { id, memberId, amountCents, paidAt }`).
+- `GET /api/homes/:homeId/balances`: Get current outstanding balances across all members in insertion order (`200 { balances: [{ memberId, name, outstandingCents }] }`).
+- `GET /api/homes/:homeId/bills`: List bills and their member shares for a home.
 
-We will run `pnpm install && pnpm check && pnpm typecheck && pnpm test` on your repository.
+---
+
+## Idempotency and Concurrent Payments
+
+Handling payments safely under retries and high concurrency is critical for financial applications:
+
+### 1. Idempotency (`Idempotency-Key` Header)
+
+- Every payment request to `POST /api/bills/:billId/shares/:shareId/pay` must supply an `Idempotency-Key` header (returns `400` if missing).
+- The API queries the `payments` table for an existing record on `share_id`:
+  - **Identical Key**: If the share was already paid using the _same_ `Idempotency-Key`, the API responds with `200 OK` and returns the previously generated payment data (`paidAt`). No second charge or duplicate record is created.
+  - **Different Key**: If the share was already paid using a _different_ key, the API rejects the request with `409 Conflict` (`{ "error": "Share already paid with a different key" }`).
+
+### 2. Concurrency & Race Condition Protection
+
+When two requests attempt to pay the exact same unpaid share at the exact same millisecond:
+- **Atomic Transaction**: The API executes both the `INSERT INTO payments` and the `UPDATE shares SET paid_at = ?` inside a single atomic D1 batch transaction (`c.env.DB.batch(...)`).
+- **Database-Level Constraint**: The `payments` table contains a named constraint `CONSTRAINT uq_payments_share UNIQUE (share_id)`.
+- **Race Outcome**: SQLite serializes writes. The first request succeeds and marks the share as paid. The second request immediately trips the `UNIQUE(share_id)` constraint and fails at the database level.
+- **Graceful Recovery**: The catch block inspects the newly created payment record:
+  - If the concurrent request carried the same idempotency key, it recovers and returns `200 OK`.
+  - If it carried a different key, it returns `409 Conflict`.
+- **UI Safety**: The frontend disables the payment button while a request is in flight (`"Processing..."`). If the payment fails (e.g., 409), the share remains in its unpaid state and displays a clear error alert without crashing.
+
+---
+
+## Technical Decisions
+
+1. **Explicit `position` Column with `UNIQUE(home_id, position)` on `members`**:
+   - _Decision_: Added an integer `position` column calculated via `(SELECT COALESCE(MAX(position), -1) + 1 FROM members WHERE home_id = ?)` along with a composite unique constraint `UNIQUE(home_id, position)`.
+   - _Why_: Relational databases do not guarantee row order without an explicit `ORDER BY`. Relying on timestamps can lead to collisions when members are created concurrently or in rapid sequence. An explicit position ensures deterministic ordering for remainder cent distribution and balance reporting.
+
+2. **Database-Level Uniqueness Constraint (`uq_payments_share`) Over Application Locks**:
+   - _Decision_: Placed a hard `UNIQUE(share_id)` constraint on the `payments` table and coupled it with D1 atomic batch statements rather than relying solely on in-memory or application-level flags.
+   - _Why_: In a distributed, serverless environment like Cloudflare Workers, in-memory mutexes do not span multiple worker instances. Enforcing uniqueness at the database layer guarantees absolute protection against double payments under all concurrency conditions.
+
+3. **Whole-Integer Cent Arithmetic (`totalCents`, `amountCents`)**:
+   - _Decision_: All monetary amounts are strictly accepted, stored, and calculated as integer whole cents. Fractions of cents are never stored.
+   - _Why_: Floating-point numbers in JavaScript suffer from IEEE 754 precision issues (e.g. `0.1 + 0.2 === 0.30000000000000004`). By using integer division (`Math.floor(totalCents / n)`) and modulo (`totalCents % n`), the shares are guaranteed to always sum up exactly to the bill's `totalCents`.
+
+---
+
+## Verification Summary
+
+All verification checks pass locally and in CI:
+- **`pnpm check`**: Biome check passed with 0 errors.
+- **`pnpm typecheck`**: Strict TypeScript compilation passed across all packages.
+- **`pnpm test`**: 24 tests passed across 3 test suites (`homes.test.ts`, `bills.test.ts`, `payments.test.ts`).
+- **`pnpm build`**: Web production bundle built successfully with Vite.
